@@ -1,6 +1,14 @@
 default: client server
 
+debug: c_debug s_debug
+
+c_debug : client.cpp client_server.h
+	g++ -g -pthread -Wall  client.cpp -o client
+
+s_debug : client.cpp client_server.h
+	g++ -g -pthread -Wall  server.cpp -o server
+	
 client: client.cpp client_server.h
-	g++ -Wall -fsanitize=address client.cpp -o client
+	g++ -pthread  -fsanitize=address -Wall client.cpp -o client
 server: server.cpp client_server.h
-	g++ -Wall -fsanitize=address server.cpp -o server
+	g++ -pthread -Wall server.cpp -o server

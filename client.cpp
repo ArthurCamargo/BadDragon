@@ -2,6 +2,7 @@
 
 using namespace std;
 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 Connection parseOptions(int argc, char* argv[])
 {
@@ -78,14 +79,7 @@ int connectServer(Connection connection)
 
 int sendProfile(Connection c)
 {
-    time_t now = time(NULL);
-    tm * ptm = localtime(&now);
-    // Send the profile name trought to the server
-    packet pkt;
-    bzero(&pkt, sizeof (pkt));
-    pkt.type = PROFILE;
-    strcpy(pkt.payload, c.profile_name);
-    strftime(pkt.timestamp, sizeof(pkt.payload), "%H:%M:%S", ptm);
+    packet pkt(0, c.profile_name, 20, PROFILE);
     pkt.length = sizeof(pkt.payload);
     pkt.seqn = 1;
 
@@ -103,7 +97,7 @@ int receiveConfirmation(int sk_fd)
     int n = read(sk_fd, &pkt, sizeof(pkt));
     if(n < 0)
     {
-        perror("Error reading from socket");
+        perror("Fail to receive confirmation");
         exit(1);
     }
 
@@ -115,71 +109,81 @@ int receiveConfirmation(int sk_fd)
     return -1;
 }
 
-int post(char* menssage, Connection c)
+int post(char* message, Connection c)
 {
-    time_t now = time(NULL);
-    tm * ptm = localtime(&now);
-    // Send the profile name trought to the server
-    packet pkt;
-    bzero(&pkt, sizeof (pkt));
-    pkt.type = SEND;
-    strcpy(pkt.payload, menssage);
-    strftime(pkt.timestamp, sizeof(pkt.payload), "%H:%M:%S", ptm);
-    pkt.length = sizeof(pkt.payload);
-    pkt.seqn = 1;
-
+    packet pkt(0, message, MAX_MESSAGE_SIZE, SEND);
     return write(c.socket, &pkt, sizeof(pkt));
 }
 
 int follow(char* profile_name, Connection c)
 {
-    time_t now = time(NULL);
-    tm * ptm = localtime(&now);
-    // Send the profile name trought to the server
-    packet pkt;
-    bzero(&pkt, sizeof (pkt));
-    pkt.type = SEND;
-    strcpy(pkt.payload, profile_name);
-    strftime(pkt.timestamp, sizeof(pkt.payload), "%H:%M:%S", ptm);
-    pkt.length = sizeof(pkt.payload);
-    pkt.seqn = 1;
-
+    packet pkt(0, profile_name, MAX_PROFILE_SIZE, FOLLOW);
     return write(c.socket, &pkt, sizeof(pkt));
 }
 
-void sendCommand(Connection c)
+void *sendServer(void *connection)
 {
+    Connection *connection_info = (Connection *) connection; // Connection info
+    bool connected = true;
     string command;
-    char data[256];
+    char data[128];
 
-    cin >> command;
-    fgets(data, 256, stdin);
 
-    if(command == "SEND")
+    while(connected)
     {
-        post(data, c);
+        cin >> command;
+        cin >> data;
+
+        if(command == "SEND")
+        {
+            post(data, *connection_info);
+        }
+        else if (command == "FOLLOW")
+        {
+            follow(data, *connection_info);
+        }
+        else
+        {
+            cout << "Invalid command:" << command << endl << "Usage: SEND <message>, FOLLOW <profile>" << endl;
+        }
     }
-    else if (command == "FOLLOW")
-    {
-        follow(data, c);
-    }
-    else
-    {
-        cout << "Invalid command:" << command << endl << "Usage: SEND <message>, FOLLOW <profile>" << endl;
-    }
+
+    return connection;
 }
 
-int listenServer(char* buffer)
+void *listenServer(void *connection)
 {
-    int response = 1;
+    Connection *connection_info = (Connection *) connection; // Connection info
+    packet pkt;
+    bool connected = true;
 
-    return 1;
+    while(connected)
+    {
+        bzero(&pkt, sizeof (pkt));
+        int n = read(connection_info->socket, &pkt, sizeof(pkt));
+        if(n < 0)
+        {
+            cout << "Error reading socket!" << endl;
+        }
+        if(n == 0)
+            connected = false;
+
+        if (pkt.type == DATA)
+        {
+            cout << "New message!" << endl;
+        }
+        cout << pkt.payload << endl;
+    }
+
+    return connection;
 }
+
 
 int main (int argc, char *argv[])
 {
     Connection connection;
-    char data_buffer[2048];
+
+    pthread_t producer, consumer;
 
     connection = parseOptions(argc, argv);
     connection.socket = connectServer(connection);
@@ -189,13 +193,12 @@ int main (int argc, char *argv[])
 
     if(confirmation)
     {
-        connection.is_connected = true;
-        while(connection.is_connected)
-        {
-            cout << "Usage: SEND <message>, FOLLOW <profile>" << endl;
-            int response = listenServer(data_buffer);
-            sendCommand(connection);
-        }
+        cout << "Usage: SEND <message>, FOLLOW <profile>" << endl;
+
+        pthread_create(&consumer, NULL, listenServer, &connection);
+        pthread_create(&producer, NULL, sendServer, &connection);
+        pthread_join(producer, NULL);
+        pthread_join(consumer, NULL);
     }
 
     close(connection.socket);
