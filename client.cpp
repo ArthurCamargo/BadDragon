@@ -45,7 +45,7 @@ Connection parseOptions(int argc, char* argv[])
 int connectServer(Connection connection)
 {
     //Connect to a server and return the socket
-    int client_sk;
+    int client_sk = -1;
     struct sockaddr_in serv_addr;
     struct hostent *server;
     server = gethostbyname(connection.ip);
@@ -79,7 +79,7 @@ int connectServer(Connection connection)
 
 int sendProfile(Connection c)
 {
-    packet pkt(0, c.profile_name, 20, PROFILE);
+    Packet pkt(0, c.profile_name, 20, PROFILE);
     pkt.length = sizeof(pkt.payload);
     pkt.seqn = 1;
 
@@ -88,11 +88,8 @@ int sendProfile(Connection c)
 
 int receiveConfirmation(int sk_fd)
 {
-    time_t now = time(NULL);
-    tm * ptm = localtime(&now);
     // Send the profile name trought to the server
-    packet pkt;
-    bzero(&pkt, sizeof (pkt));
+    Packet pkt(0, 0, SEND);
 
     int n = read(sk_fd, &pkt, sizeof(pkt));
     if(n < 0)
@@ -106,19 +103,31 @@ int receiveConfirmation(int sk_fd)
         cout << "You're Successfully logged in :)" << endl;
         return 1;
     }
+    if (pkt.type == FAILURE)
+    {
+        cout << "Could not connect, too much connections" << endl;
+        exit(1);
+    }
     return -1;
 }
 
 int post(char* message, Connection c)
 {
-    packet pkt(0, message, MAX_MESSAGE_SIZE, SEND);
+    Packet pkt(0, message, MAX_MESSAGE_SIZE, SEND);
     return write(c.socket, &pkt, sizeof(pkt));
 }
 
 int follow(char* profile_name, Connection c)
 {
-    packet pkt(0, profile_name, MAX_PROFILE_SIZE, FOLLOW);
+    Packet pkt(0, profile_name, MAX_PROFILE_SIZE, FOLLOW);
     return write(c.socket, &pkt, sizeof(pkt));
+}
+
+void parseInput(string &command, char* data)
+{
+    cin >> command;
+    cin.ignore(1); //ignore the white space
+    cin.getline(data, MAX_MESSAGE_SIZE, '\n');
 }
 
 void *sendServer(void *connection)
@@ -128,11 +137,11 @@ void *sendServer(void *connection)
     string command;
     char data[128];
 
-
     while(connected)
     {
-        cin >> command;
-        cin >> data;
+        string command;
+
+        parseInput(command, data);
 
         if(command == "SEND")
         {
@@ -154,30 +163,28 @@ void *sendServer(void *connection)
 void *listenServer(void *connection)
 {
     Connection *connection_info = (Connection *) connection; // Connection info
-    packet pkt;
+    Packet pkt(0,0, SEND);
     bool connected = true;
 
     while(connected)
     {
-        bzero(&pkt, sizeof (pkt));
         int n = read(connection_info->socket, &pkt, sizeof(pkt));
         if(n < 0)
         {
             cout << "Error reading socket!" << endl;
+            connected = false;
         }
         if(n == 0)
             connected = false;
 
         if (pkt.type == DATA)
         {
-            cout << "New message!" << endl;
+            cout << pkt.payload << endl;
         }
-        cout << pkt.payload << endl;
     }
 
     return connection;
 }
-
 
 int main (int argc, char *argv[])
 {
@@ -189,10 +196,17 @@ int main (int argc, char *argv[])
     connection.socket = connectServer(connection);
 
     int send_result = sendProfile(connection);
+    if(!send_result)
+        cout << "Profile was not sent" << endl;
+
     int confirmation = receiveConfirmation(connection.socket);
+    if(!confirmation)
+        cout << "No confirmation from the server" << endl;
 
     if(confirmation)
     {
+        cout << "\033[2J\033[1;1H";
+        cout << "Hi, " <<  connection.profile_name << endl;
         cout << "Usage: SEND <message>, FOLLOW <profile>" << endl;
 
         pthread_create(&consumer, NULL, listenServer, &connection);

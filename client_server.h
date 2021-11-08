@@ -15,8 +15,10 @@
 #include <time.h>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 const int TIMESTAMP_SIZE = 128;
+const int MAX_SESSION = 2;
 const int MAX_PROFILE_SIZE = 20;
 const int MAX_MESSAGE_SIZE = 128;
 
@@ -33,15 +35,15 @@ typedef struct Connection
 class Notification
 {
     static uint32_t count; // Number of Notifications
-    const char* author;     // Author
+    std::string author;     // Author
     char* timestamp; // TimeStamp
     uint32_t length; // Body lenght
     uint32_t not_received; // Number of people pending
-    const char* body; // Body of the message
+    const char*  body; // Body of the message
     uint32_t id; //Unique id
 
     public:
-        Notification(char* _body, const char* _author, uint32_t _not_received)
+        Notification(const char* _body, std::string _author, uint32_t _not_received)
         {
             body = _body;
             author = _author;
@@ -49,10 +51,6 @@ class Notification
 
             id = count;
             length = strlen(body);
-
-            //time_t now = time(NULL);
-            //tm * ptm = localtime(&now);
-            //strftime(timestamp, sizeof(timestamp), "%H:%M:%S",ptm);
 
             count ++;
         }
@@ -67,12 +65,25 @@ class Notification
             return id;
         }
 
-        char* getBody()
+        const char* getBody()
         {
-            char* buffer;
-            strcpy(buffer,body);
-            return buffer;
+            return body;
         }
+};
+
+class Device {
+    public:
+        int id;
+        int socket;
+        bool online; // If the device is current online
+
+    Device() {};
+    Device(const int &_id, const int& _socket, const int& _online)
+    {
+        id = _id;
+        socket = _socket;
+        online = _online;
+    }
 };
 
 class Profile{
@@ -80,26 +91,20 @@ class Profile{
     public:
         std::string profile_name; //Nome do usuario na aplicacao @exemplo
         std::vector <uint32_t> followers; // vetor de ponteiro para os followers
-        std::vector <uint32_t> pending_notifications; // Notificações pendentes
+        std::vector <Notification> notifications; //Vector of notifications of the user
+        std::queue <std::pair<uint32_t, uint32_t>> pending_notifications; // Notificações pendentes
+        std::vector<Device> devices; // devices connected to the user
         int sessions_number; // Numero de sessões já incializadas pelo usuário
-    Profile(){};
-    Profile(std::string name)
-    {
-        profile_name = name;
-        sessions_number = 0;
-    }
 };
 
 class ClientData{
     //wrapper do cliente
     public:
-        std::vector<std::pair<uint32_t, uint32_t>> pending_notifications; // <profile, notification>
-        std::vector<Notification> notifications;
+        std::vector<Profile> profiles;
         connection_data connection;
         pthread_t* consumer;
         pthread_t* producer;
         int profile_number;
-        std::vector<Profile> *profile_ptr;
 };
 
 enum pkt_type
@@ -113,15 +118,14 @@ enum pkt_type
     FOLLOW = 6,
 };
 
-class packet{
+class Packet{
     public:
         enum pkt_type type;      //Tipo do pacote (p.ex. DATA | CMD)
         int32_t seqn;            //Número de sequência
         int32_t length;          //Comprimento do payload
-        char* timestamp;         // Timestamp do dado
         char payload[256];       //Dados da mensagem
 
-        packet()
+        Packet()
         {
             seqn = 0;
             length = 0;
@@ -129,17 +133,26 @@ class packet{
             bzero((char*)payload,length);
         }
 
-        packet(int32_t _seqn, char* _payload, int32_t _length, enum pkt_type _type)
+        Packet(int32_t _seqn, char* _payload, int32_t _length, enum pkt_type _type)
         {
+            //struct tm* time_manager;
+            //time_t rawtime;
+            //time(&rawtime);
+
+            //time_manager = localtime(&rawtime);
+            //std::cout << "Tempo" << std::endl;
+
             type = _type;
             length = _length;
             seqn = _seqn;
+
+            //strftime(timestamp, 25, "%H:%M%p", time_manager);
 
             bzero((char*)payload,length);
             strcpy(payload, _payload);
         }
 
-        packet(int32_t _seqn, int32_t _length, enum pkt_type _type)
+        Packet(int32_t _seqn, int32_t _length, enum pkt_type _type)
         {
             type = _type;
             length = _length;
@@ -149,3 +162,27 @@ class packet{
         }
 };
 
+int sendConfirmation(int socket, enum pkt_type type);
+int saveProfiles(std::vector<Profile> &profiles);
+void *listenServer(void *connection);
+void *sendServer(void *connection);
+int follow(char* profile_name, Connection c);
+int post(char* message, Connection c);
+int receiveConfirmation(int sk_fd);
+int sendProfile(Connection c);
+int connectServer(Connection connection);
+Connection parseOptions(int argc, char* argv[]);
+Connection startServer(int port);
+std::vector<uint32_t> getFollowers(ClientData *client, int profile_number);
+void queueMessage(ClientData *client, int profile_number, const char* message_data);
+int loadProfiles(std::vector<Profile> &profiles);
+int saveProfiles(std::vector<Profile> &profiles);
+int followPersonByName(std::vector<Profile> &profiles, int profile_number, std::string profile_name);
+void processRequest(ClientData *client, int profile_number, Packet pkt);
+void* listenClient(void* client_ptr);
+void sendPending(ClientData *client, int profile_number, int socket);
+void* messageClient(void * client_ptr);
+void createThreads(ClientData &c);
+int findNotificationById(ClientData *client, int profile_number, int id);
+void printUsers(ClientData *client);
+void printPendingNotifications(ClientData *client);
