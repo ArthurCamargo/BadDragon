@@ -320,12 +320,20 @@ void processRequest(ClientData *client, int profile_number, Packet pkt)
     }
 }
 
+void reduceDeviceNumber(ClientData *client, int profile_number)
+{
+    for(uint i = 0; i < client->profiles[profile_number].devices.size(); i ++)
+    {
+        client->profiles[profile_number].devices[i].id --;
+    }
+}
+
 void* listenClient(void* client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
     int session = client->profiles[profile_number].sessions_number;
-    int device_id = session - 1;
+    int device_id = client->profiles[profile_number].devices[session - 1].id;
     int socket = client->profiles[profile_number].devices[device_id].socket;
     bool online = client->profiles[profile_number].devices[device_id].online;
 
@@ -357,12 +365,14 @@ void* messageClient(void * client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
-    int device_id = client->profiles[profile_number].sessions_number - 1;
+    int session = client->profiles[profile_number].sessions_number;
+    int device_id = client->profiles[profile_number].devices[session - 1].id;
     int socket = client->profiles[profile_number].devices[device_id].socket;
     bool online = client->profiles[profile_number].devices[device_id].online;
 
     while(online)
     {
+        cout << device_id << endl;
         pthread_mutex_lock(&mutex);
         online = client->profiles[profile_number].devices[device_id].online;
         sendPending(client, profile_number, socket);
@@ -372,9 +382,9 @@ void* messageClient(void * client_ptr)
     if(!client->profiles[profile_number].devices.empty())
     {
         pthread_mutex_lock(&mutex);
-        client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + device_id);
+        //client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + device_id);
         client->profiles[profile_number].sessions_number --;
-        device_id --;
+        reduceDeviceNumber(client, profile_number);
         pthread_mutex_unlock(&mutex);
     }
 
