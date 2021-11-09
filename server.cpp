@@ -17,7 +17,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex
 
 uint32_t Notification::count = 0; //static notification counter
 
-Connection startServer(int port)
+Connection startConnection(int port)
 {
     //Start the server using the port especified, and return the server socket
     int server_sk = socket(AF_INET, SOCK_STREAM, 0);
@@ -50,6 +50,37 @@ Connection startServer(int port)
 
     return c;
 }
+
+
+void createServers(int server_number){
+
+    cout << "Creating servers ... " << endl;
+
+    vector<Server> server_train;
+    Server actual_server;
+    Server* last_server = NULL;
+    ClientData client_data;
+
+    for(int i = 0; i < server_number; i++){
+        server_train.push_back(Server(i, last_server, client_data));
+        last_server = &server_train[i]; 
+    }
+
+    server_train[0].neighbor = last_server;
+
+    for(int i = 0; i < server_train.size(); i++){
+        
+        pthread_t* server_thread_ptr;
+        server_thread_ptr = (pthread_t*) malloc(sizeof(pthread_t));
+
+        pthread_create(server_thread_ptr, NULL, runServer, (void *) &server_train[i]);
+
+    }
+}
+
+// 0 -> null
+// 1 -> 0
+// 2 -> 1
 
 int findProfileByName(string profile_name, vector<Profile>& profiles)
 {
@@ -320,20 +351,12 @@ void processRequest(ClientData *client, int profile_number, Packet pkt)
     }
 }
 
-void reduceDeviceNumber(ClientData *client, int profile_number)
-{
-    for(uint i = 0; i < client->profiles[profile_number].devices.size(); i ++)
-    {
-        client->profiles[profile_number].devices[i].id --;
-    }
-}
-
 void* listenClient(void* client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
     int session = client->profiles[profile_number].sessions_number;
-    int device_id = client->profiles[profile_number].devices[session - 1].id;
+    int device_id = session - 1;
     int socket = client->profiles[profile_number].devices[device_id].socket;
     bool online = client->profiles[profile_number].devices[device_id].online;
 
@@ -341,15 +364,16 @@ void* listenClient(void* client_ptr)
 
     while(online)
     {
+
         Packet pkt;
 
         n = read(socket, &pkt, sizeof(pkt));
         if(n == 0)
-            client->profiles[profile_number].devices[device_id].online = false;
+            client->profiles[profile_number].devices[session - 1].online = false;
 
         pthread_mutex_lock(&mutex);
         if(!client->profiles[profile_number].devices.empty())
-            online = client->profiles[profile_number].devices[device_id].online;
+            online = client->profiles[profile_number].devices[session - 1].online;
         else
             online = false;
         processRequest(client, profile_number, pkt);
@@ -365,16 +389,14 @@ void* messageClient(void * client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
-    int session = client->profiles[profile_number].sessions_number;
-    int device_id = client->profiles[profile_number].devices[session - 1].id;
-    int socket = client->profiles[profile_number].devices[device_id].socket;
-    bool online = client->profiles[profile_number].devices[device_id].online;
+    int id_device = client->profiles[profile_number].sessions_number - 1;
+    int socket = client->profiles[profile_number].devices[id_device].socket;
+    bool online = client->profiles[profile_number].devices[id_device].online;
 
     while(online)
     {
-        cout << device_id << endl;
         pthread_mutex_lock(&mutex);
-        online = client->profiles[profile_number].devices[device_id].online;
+        online = client->profiles[profile_number].devices[id_device].online;
         sendPending(client, profile_number, socket);
         pthread_mutex_unlock(&mutex);
     }
@@ -382,9 +404,9 @@ void* messageClient(void * client_ptr)
     if(!client->profiles[profile_number].devices.empty())
     {
         pthread_mutex_lock(&mutex);
-        //client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + device_id);
+        client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + id_device);
         client->profiles[profile_number].sessions_number --;
-        reduceDeviceNumber(client, profile_number);
+        id_device --;
         pthread_mutex_unlock(&mutex);
     }
 
@@ -471,19 +493,15 @@ void createThreads(ClientData &c)
 };
 
 
-int main (int argc, char* argv [])
-{
-    Connection c;
+void* runServer(void* actual_client){
 
     int new_sock_fd;
-    pair<int,socklen_t> socket;
-    ClientData actual_client;
-
-    c = startServer(PORT);
+    ClientData *client = (ClientData *) actual_client;
+    Connection c = startConnection(PORT);
 
     while(1)
     {
-            loadProfiles(actual_client.profiles);
+            loadProfiles(client->profiles);
             if ((new_sock_fd = accept(c.socket, (struct sockaddr *) &c.addr, &c.socklen)) == -1)
             {
                 perror("Accept ERROR");
@@ -491,10 +509,23 @@ int main (int argc, char* argv [])
             }
             else
             {
-                actual_client.connection.socket = new_sock_fd;
-                login(actual_client, new_sock_fd);
+                client->connection.socket = new_sock_fd;
+                login(*client, new_sock_fd);
             }
-            saveProfiles(actual_client.profiles);
+            saveProfiles(client->profiles);
     }
+}
+
+int main (int argc, char* argv [])
+{
+    int new_sock_fd;
+    pair<int,socklen_t> socket;
+    ClientData actual_client;
+
+    
+    createServers(atoi(argv[1]));
+
+    while(1 != 2){}
+
     return 0;
 }

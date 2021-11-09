@@ -1,5 +1,3 @@
-@bruno,@diego,
-@diego,@bruno,@arthur,
-@arthur,@diego,
-@tutu,@didi,
-@didi,@tutu,
+@tutu,@adriano,
+@adriano,@tutu,
+@bruno,

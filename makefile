@@ -6,7 +6,7 @@ c_debug : client.cpp client_server.h
 	g++ -g -pthread -Wall  client.cpp -o client
 
 s_debug : client.cpp client_server.h
-	g++ -g -pthread -Wall  server.cpp -o server
+	g++ -g -pthread -fsanitize=address -Wall  server.cpp -o server
 	
 client: client.cpp client_server.h
 	g++ -pthread  -Wall -O3 client.cpp -o client

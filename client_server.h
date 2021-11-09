@@ -17,10 +17,12 @@
 #include <sstream>
 #include <vector>
 
+
 const int TIMESTAMP_SIZE = 128;
 const int MAX_SESSION = 2;
 const int MAX_PROFILE_SIZE = 20;
 const int MAX_MESSAGE_SIZE = 128;
+
 
 typedef struct Connection
 {
@@ -31,6 +33,21 @@ typedef struct Connection
     socklen_t socklen;
     sockaddr_in addr;
 } connection_data;
+
+class Server{
+
+    public:
+        int server_id;
+        Server* neighbor;
+        ClientData client_data;
+
+        Server();
+        Server(int new_server_id, Server* new_neighbor, ClientData new_client_data){
+            server_id = new_server_id;
+            neighbor = new_neighbor;
+            client_data = new_client_data;
+        }
+};
 
 class Notification
 {
@@ -97,6 +114,7 @@ class Profile{
         int sessions_number; // Numero de sessões já incializadas pelo usuário
 };
 
+
 class ClientData{
     //wrapper do cliente
     public:
@@ -162,6 +180,7 @@ class Packet{
         }
 };
 
+
 int sendConfirmation(int socket, enum pkt_type type);
 int saveProfiles(std::vector<Profile> &profiles);
 void *listenServer(void *connection);
@@ -169,10 +188,12 @@ void *sendServer(void *connection);
 int follow(char* profile_name, Connection c);
 int post(char* message, Connection c);
 int receiveConfirmation(int sk_fd);
+void createServers(int server_number);
+void* runServer(void* actual_client);
 int sendProfile(Connection c);
 int connectServer(Connection connection);
 Connection parseOptions(int argc, char* argv[]);
-Connection startServer(int port);
+Connection startConnection(int port);
 std::vector<uint32_t> getFollowers(ClientData *client, int profile_number);
 void queueMessage(ClientData *client, int profile_number, const char* message_data);
 int loadProfiles(std::vector<Profile> &profiles);
@@ -183,6 +204,8 @@ void* listenClient(void* client_ptr);
 void sendPending(ClientData *client, int profile_number, int socket);
 void* messageClient(void * client_ptr);
 void createThreads(ClientData &c);
+
 int findNotificationById(ClientData *client, int profile_number, int id);
+
 void printUsers(ClientData *client);
 void printPendingNotifications(ClientData *client);
