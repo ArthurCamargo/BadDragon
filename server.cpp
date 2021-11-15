@@ -10,14 +10,14 @@
 #include <exception>
 
 
-const int PORT = 8080;
+int PORT = 8080;
 using namespace std;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex
 
 uint32_t Notification::count = 0; //static notification counter
 
-Connection startConnection(int port)
+Connection startServer(int port)
 {
     //Start the server using the port especified, and return the server socket
     int server_sk = socket(AF_INET, SOCK_STREAM, 0);
@@ -34,7 +34,7 @@ Connection startConnection(int port)
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port);
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(serv_addr.sin_zero), 8);
+    bzero(&(serv_addr.sin_zero), sizeof(serv_addr.sin_zero));
 
     if (bind(server_sk, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
     {
@@ -50,37 +50,6 @@ Connection startConnection(int port)
 
     return c;
 }
-
-
-void createServers(int server_number){
-
-    cout << "Creating servers ... " << endl;
-
-    vector<Server> server_train;
-    Server actual_server;
-    Server* last_server = NULL;
-    ClientData client_data;
-
-    for(int i = 0; i < server_number; i++){
-        server_train.push_back(Server(i, last_server, client_data));
-        last_server = &server_train[i]; 
-    }
-
-    server_train[0].neighbor = last_server;
-
-    for(int i = 0; i < server_train.size(); i++){
-        
-        pthread_t* server_thread_ptr;
-        server_thread_ptr = (pthread_t*) malloc(sizeof(pthread_t));
-
-        pthread_create(server_thread_ptr, NULL, runServer, (void *) &server_train[i]);
-
-    }
-}
-
-// 0 -> null
-// 1 -> 0
-// 2 -> 1
 
 int findProfileByName(string profile_name, vector<Profile>& profiles)
 {
@@ -351,12 +320,20 @@ void processRequest(ClientData *client, int profile_number, Packet pkt)
     }
 }
 
+void reduceDeviceNumber(ClientData *client, int profile_number)
+{
+    for(uint i = 0; i < client->profiles[profile_number].devices.size(); i ++)
+    {
+        client->profiles[profile_number].devices[i].id --;
+    }
+}
+
 void* listenClient(void* client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
     int session = client->profiles[profile_number].sessions_number;
-    int device_id = session - 1;
+    int device_id = client->profiles[profile_number].devices[session - 1].id;
     int socket = client->profiles[profile_number].devices[device_id].socket;
     bool online = client->profiles[profile_number].devices[device_id].online;
 
@@ -364,16 +341,15 @@ void* listenClient(void* client_ptr)
 
     while(online)
     {
-
         Packet pkt;
 
         n = read(socket, &pkt, sizeof(pkt));
         if(n == 0)
-            client->profiles[profile_number].devices[session - 1].online = false;
+            client->profiles[profile_number].devices[device_id].online = false;
 
         pthread_mutex_lock(&mutex);
         if(!client->profiles[profile_number].devices.empty())
-            online = client->profiles[profile_number].devices[session - 1].online;
+            online = client->profiles[profile_number].devices[device_id].online;
         else
             online = false;
         processRequest(client, profile_number, pkt);
@@ -389,14 +365,16 @@ void* messageClient(void * client_ptr)
 {
     ClientData *client = (ClientData *) client_ptr;
     int profile_number = client->profile_number;
-    int id_device = client->profiles[profile_number].sessions_number - 1;
-    int socket = client->profiles[profile_number].devices[id_device].socket;
-    bool online = client->profiles[profile_number].devices[id_device].online;
+    int session = client->profiles[profile_number].sessions_number;
+    int device_id = client->profiles[profile_number].devices[session - 1].id;
+    int socket = client->profiles[profile_number].devices[device_id].socket;
+    bool online = client->profiles[profile_number].devices[device_id].online;
 
     while(online)
     {
+        cout << device_id << endl;
         pthread_mutex_lock(&mutex);
-        online = client->profiles[profile_number].devices[id_device].online;
+        online = client->profiles[profile_number].devices[device_id].online;
         sendPending(client, profile_number, socket);
         pthread_mutex_unlock(&mutex);
     }
@@ -404,9 +382,9 @@ void* messageClient(void * client_ptr)
     if(!client->profiles[profile_number].devices.empty())
     {
         pthread_mutex_lock(&mutex);
-        client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + id_device);
+        //client->profiles[profile_number].devices.erase(client->profiles[profile_number].devices.begin() + device_id);
         client->profiles[profile_number].sessions_number --;
-        id_device --;
+        reduceDeviceNumber(client, profile_number);
         pthread_mutex_unlock(&mutex);
     }
 
@@ -492,40 +470,125 @@ void createThreads(ClientData &c)
     pthread_create(consumer_ptr, NULL, messageClient,(void *) client_ptr);
 };
 
+//1o servidor
+//2o master ou backup
+//3o PORT
+//3o nro backups
 
-void* runServer(void* actual_client){
+int argChooseServer(int argc, char* argv[]){
+    int ret;
+    
+    if (argc < 3 && argc > 4){
+        cout << "Wrong number of parameters." << endl;
+        exit(1);
+    }
 
+    PORT = atoi(argv[2]);
+
+    if (!strcmp(argv[1],"master")){
+        if(argc == 4){
+            PORT = atoi(argv[3]);
+            ret  = atoi(argv[2]);
+        }
+        else{
+            ret = 0;
+        }
+    }
+
+    else if (!strcmp(argv[1], "backup"))
+        ret = -1;
+
+    return ret;
+}
+
+
+void connectClient(ClientData actual_client){
     int new_sock_fd;
-    ClientData *client = (ClientData *) actual_client;
-    Connection c = startConnection(PORT);
+    Connection c;
 
-    while(1)
-    {
-            loadProfiles(client->profiles);
-            if ((new_sock_fd = accept(c.socket, (struct sockaddr *) &c.addr, &c.socklen)) == -1)
+    c = startServer(PORT);
+
+    while(1){
+        loadProfiles(actual_client.profiles);
+        if ((new_sock_fd = accept(c.socket, (struct sockaddr *) &c.addr, &c.socklen)) == -1)
             {
                 perror("Accept ERROR");
                 exit(EXIT_FAILURE);
             }
-            else
+        else
             {
-                client->connection.socket = new_sock_fd;
-                login(*client, new_sock_fd);
+                actual_client.connection.socket = new_sock_fd;
+                login(actual_client, new_sock_fd);
             }
-            saveProfiles(client->profiles);
+        saveProfiles(actual_client.profiles);
     }
+}
+
+Connection parseOptions(int argc, char* argv[]){
+    //Parse the options and put the data inside the connection
+    int opt;
+    Connection c;
+    while((opt = getopt(argc, argv, "u:i:p:")) != -1)
+    {
+        switch(opt)
+        {
+            case 'u':
+                if (strlen(optarg) > 20 || strlen(optarg) < 4)
+                {
+                    cout << "Error: profile out of bounds (4 - 20 characters)" << endl;
+                    exit(1);
+                    break;
+                }
+                c.profile_name = optarg;
+                break;
+            case 'i':
+                c.ip = optarg;
+                break;
+            case 'p':
+                c.port = atoi(optarg);
+                break;
+            case '?':
+                cout << "Usage: client -u <profile> -i <ip> -p <port>" << endl;
+                exit(1);
+                break;
+            default:
+                cout << "Usage: client -u <profile> -i <ip> -p <port>" << endl;
+                exit(1);
+                break;
+        }
+    }
+
+    return c;
 }
 
 int main (int argc, char* argv [])
 {
-    int new_sock_fd;
+    Connection s;
+    int num_backup;
     pair<int,socklen_t> socket;
     ClientData actual_client;
+    Server new_server;
+
+
+    num_backup = argChooseServer(argc, argv);
+
+    if (num_backup >= 0){
+
+        new_server.master = true;
+        new_server.backup_count = num_backup;
+        
+    }
 
     
-    createServers(atoi(argv[1]));
+    s = startServer(PORT+1);
 
-    while(1 != 2){}
+    connectServer();
+
+    if (new_server.master){
+
+        connectClient(actual_client);
+
+    }
 
     return 0;
 }

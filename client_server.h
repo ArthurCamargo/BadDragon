@@ -34,21 +34,6 @@ typedef struct Connection
     sockaddr_in addr;
 } connection_data;
 
-class Server{
-
-    public:
-        int server_id;
-        Server* neighbor;
-        ClientData client_data;
-
-        Server();
-        Server(int new_server_id, Server* new_neighbor, ClientData new_client_data){
-            server_id = new_server_id;
-            neighbor = new_neighbor;
-            client_data = new_client_data;
-        }
-};
-
 class Notification
 {
     static uint32_t count; // Number of Notifications
@@ -180,7 +165,28 @@ class Packet{
         }
 };
 
+class Server{
 
+    public:
+        int server_id;
+        Server* neighbor;
+        ClientData client_data;
+        bool master;
+        int backup_count;
+
+        Server(){
+            master = false;
+        }
+        Server(int new_server_id, Server* new_neighbor, ClientData new_client_data, bool new_master, int new_backup_count){
+            server_id = new_server_id;
+            neighbor = new_neighbor;
+            client_data = new_client_data;
+            master = new_master;
+            backup_count = new_backup_count;
+        }
+};
+
+int argChooseServer(int argc, char* argv[]);
 int sendConfirmation(int socket, enum pkt_type type);
 int saveProfiles(std::vector<Profile> &profiles);
 void *listenServer(void *connection);
